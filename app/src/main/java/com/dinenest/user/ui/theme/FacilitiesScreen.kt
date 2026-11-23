@@ -2,6 +2,7 @@ package com.dinenest.user.ui.theme
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -54,12 +56,14 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dinenest.user.model.Facility
+import com.dinenest.user.model.FoodMall
 import com.google.firebase.firestore.FirebaseFirestore
 
 private enum class FacilityFilter(val label: String, val type: String?) {
-    BOTH("All", null),
+    ALL("All", null),
     RESTROOM("Restroom", "restroom"),
-    EV("EV", "ev")
+    EV("EV", "ev"),
+    HOTEL("Hotel + Room", null)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,45 +72,78 @@ fun FacilitiesScreen() {
     val focusManager = LocalFocusManager.current
 
     var all by remember { mutableStateOf<List<Facility>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    var malls by remember { mutableStateOf<List<FoodMall>>(emptyList()) }
+    var loadingFacilities by remember { mutableStateOf(true) }
+    var loadingMalls by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
-    var filter by remember { mutableStateOf(FacilityFilter.BOTH) }
+    var filter by remember { mutableStateOf(FacilityFilter.ALL) }
     var searchFocused by remember { mutableStateOf(false) }
     var showLocationInfo by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
-        val registration = FirebaseFirestore.getInstance()
-            .collection("facilities")
+        val db = FirebaseFirestore.getInstance()
+        val facilitiesReg = db.collection("facilities")
             .addSnapshotListener { snapshot, e ->
-                loading = false
+                loadingFacilities = false
                 if (e != null) {
                     error = e.message ?: "Something went wrong"
                     return@addSnapshotListener
                 }
                 all = snapshot?.toObjects(Facility::class.java) ?: emptyList()
             }
-        onDispose { registration.remove() }
+        val mallsReg = db.collection("foodMalls")
+            .addSnapshotListener { snapshot, e ->
+                loadingMalls = false
+                if (e != null) {
+                    error = e.message ?: "Something went wrong"
+                    return@addSnapshotListener
+                }
+                malls = snapshot?.toObjects(FoodMall::class.java) ?: emptyList()
+            }
+        onDispose {
+            facilitiesReg.remove()
+            mallsReg.remove()
+        }
     }
 
     BackHandler(enabled = searchFocused) { focusManager.clearFocus() }
 
+    val loading = loadingFacilities || loadingMalls
     val restrooms = all.filter { it.type == "restroom" }
     val evStations = all.filter { it.type == "ev" }
+    val hotels = malls.filter { it.hasRestRooms }
 
     val text = query.trim()
-    val visible = all.filter { facility ->
-        (filter.type == null || facility.type == filter.type) &&
-                (text.isEmpty() ||
-                        facility.name.contains(text, ignoreCase = true) ||
-                        facility.address.contains(text, ignoreCase = true) ||
-                        facility.details.contains(text, ignoreCase = true))
+
+    val visibleFacilities = when (filter) {
+        FacilityFilter.HOTEL -> emptyList()
+        else -> all.filter { facility ->
+            (filter.type == null || facility.type == filter.type) &&
+                    (text.isEmpty() ||
+                            facility.name.contains(text, ignoreCase = true) ||
+                            facility.address.contains(text, ignoreCase = true) ||
+                            facility.details.contains(text, ignoreCase = true))
+        }
     }
 
+    val visibleHotels = when (filter) {
+        FacilityFilter.RESTROOM, FacilityFilter.EV -> emptyList()
+        else -> hotels.filter { hotel ->
+            text.isEmpty() ||
+                    hotel.name.contains(text, ignoreCase = true) ||
+                    hotel.address.contains(text, ignoreCase = true) ||
+                    hotel.restroomDetails.contains(text, ignoreCase = true)
+        }
+    }
+
+    val total = visibleFacilities.size + visibleHotels.size
+
     val heading = when (filter) {
-        FacilityFilter.BOTH -> "All stops (${visible.size})"
-        FacilityFilter.RESTROOM -> "Restroom (${visible.size})"
-        FacilityFilter.EV -> "EV charging (${visible.size})"
+        FacilityFilter.ALL -> "All stops ($total)"
+        FacilityFilter.RESTROOM -> "Restroom ($total)"
+        FacilityFilter.EV -> "EV charging ($total)"
+        FacilityFilter.HOTEL -> "Hotel + Room ($total)"
     }
 
     val cheapestRest = restrooms.minByOrNull { it.price }
@@ -138,7 +175,7 @@ fun FacilitiesScreen() {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = { Text("Search rest rooms and EV stations") },
+                    placeholder = { Text("Search rest rooms, EV and hotels") },
                     leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null) },
                     trailingIcon = {
                         if (query.isNotEmpty()) {
@@ -162,9 +199,12 @@ fun FacilitiesScreen() {
                         .onFocusChanged { searchFocused = it.isFocused }
                 )
 
-                if (searchFocused || filter != FacilityFilter.BOTH) {
+                if (searchFocused || filter != FacilityFilter.ALL) {
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
                         FacilityFilter.values().forEach { option ->
                             FilterChip(
                                 selected = filter == option,
@@ -196,7 +236,8 @@ fun FacilitiesScreen() {
                                         title = "Nearby location",
                                         description = "Turn on live location to see the closest " +
                                                 "rest rooms and EV stations on your route.",
-                                        stat = "${all.size} stops on the Mumbai-Pune route",
+                                        stat = "${all.size + hotels.size} stops on the " +
+                                                "Mumbai-Pune route",
                                         container = MaterialTheme.colorScheme.primaryContainer,
                                         content = MaterialTheme.colorScheme.onPrimaryContainer,
                                         onClick = { showLocationInfo = true }
@@ -237,7 +278,7 @@ fun FacilitiesScreen() {
                             )
                         }
 
-                        if (visible.isEmpty()) {
+                        if (total == 0) {
                             item {
                                 Text(
                                     "Nothing found",
@@ -246,9 +287,15 @@ fun FacilitiesScreen() {
                                 )
                             }
                         } else {
-                            items(visible, key = { it.id }) { facility ->
+                            items(visibleFacilities, key = { "f_${it.id}" }) { facility ->
                                 FacilityCard(
                                     item = facility,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                            items(visibleHotels, key = { "h_${it.id}" }) { hotel ->
+                                HotelRoomCard(
+                                    mall = hotel,
                                     modifier = Modifier.padding(horizontal = 16.dp)
                                 )
                             }
@@ -337,14 +384,14 @@ private fun priceUnitLabel(unit: String): String {
 }
 
 @Composable
-private fun StatusPill(available: Boolean) {
-    val tone = if (available) Color(0xFF16A34A) else Color(0xFFDC2626)
+private fun StatusPill(label: String, positive: Boolean) {
+    val tone = if (positive) Color(0xFF16A34A) else Color(0xFFDC2626)
     Surface(
         shape = RoundedCornerShape(50),
         color = tone.copy(alpha = 0.15f)
     ) {
         Text(
-            text = if (available) "Available" else "Unavailable",
+            text = label,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
             color = tone,
@@ -374,7 +421,10 @@ fun FacilityCard(
                         Text(item.address, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.width(8.dp))
-                    StatusPill(item.available)
+                    StatusPill(
+                        label = if (item.available) "Available" else "Unavailable",
+                        positive = item.available
+                    )
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -413,6 +463,91 @@ fun FacilityCard(
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 2.dp)
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HotelRoomCard(
+    mall: FoodMall,
+    modifier: Modifier = Modifier
+) {
+    val hasPrice = mall.restroomPrice > 0
+    val open = mall.isOpen
+
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "HOTEL + ROOM",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            mall.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(mall.address, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    StatusPill(
+                        label = if (open) "Open" else "Closed",
+                        positive = open
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Text("Rating: ${mall.rating}")
+                Text(
+                    mall.restroomDetails.ifEmpty { "Rest rooms available at this hotel" }
+                )
+                if (mall.restroomCapacity > 0) {
+                    Text("Sleeps up to ${mall.restroomCapacity} person(s)")
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (hasPrice && open) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    )
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                if (hasPrice) {
+                    val tone = if (open) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    Text(
+                        text = "₹${mall.restroomPrice.toInt()}",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = tone
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = priceUnitLabel(mall.restroomPriceUnit),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = tone,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                } else {
+                    Text(
+                        text = "Room rates coming soon",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

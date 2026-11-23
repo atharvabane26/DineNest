@@ -1,7 +1,7 @@
 package com.dinenest.user.model
 
-import com.google.firebase.firestore.PropertyName
 import com.google.firebase.firestore.DocumentId
+import com.google.firebase.firestore.PropertyName
 
 data class FoodMall(
     @DocumentId val id: String = "",
@@ -13,5 +13,9 @@ data class FoodMall(
     val hasRestRooms: Boolean = false,
     val hasEvCharging: Boolean = false,
     @get:PropertyName("isOpen") @set:PropertyName("isOpen")
-    var isOpen: Boolean = true
+    var isOpen: Boolean = true,
+    val restroomPrice: Double = 0.0,
+    val restroomPriceUnit: String = "",
+    val restroomCapacity: Int = 0,
+    val restroomDetails: String = ""
 )
