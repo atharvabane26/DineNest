@@ -59,6 +59,8 @@ import com.dinenest.user.model.Facility
 import com.dinenest.user.model.FoodMall
 import com.google.firebase.firestore.FirebaseFirestore
 
+private const val HOTEL_CAPACITY = 5
+
 private enum class FacilityFilter(val label: String, val type: String?) {
     ALL("All", null),
     RESTROOM("Restroom", "restroom"),
@@ -127,13 +129,14 @@ fun FacilitiesScreen() {
         }
     }
 
+    // Hotel restroom details and the 12-hour price are read from foodMalls.
     val visibleHotels = when (filter) {
-        FacilityFilter.RESTROOM, FacilityFilter.EV -> emptyList()
+        FacilityFilter.EV -> emptyList()
         else -> hotels.filter { hotel ->
             text.isEmpty() ||
                     hotel.name.contains(text, ignoreCase = true) ||
                     hotel.address.contains(text, ignoreCase = true) ||
-                    hotel.restroomDetails.contains(text, ignoreCase = true)
+                    hotel.roomDetails.contains(text, ignoreCase = true)
         }
     }
 
@@ -147,10 +150,13 @@ fun FacilitiesScreen() {
     }
 
     val cheapestRest = restrooms.minByOrNull { it.price }
-    val restStat = if (cheapestRest == null) {
-        "No rest rooms added yet"
-    } else {
-        "${restrooms.size} rest room(s) • From ₹${cheapestRest.price.toInt()} ${cheapestRest.priceUnit}"
+    val cheapestHotelRestroom = hotels.filter { it.roomPrice > 0.0 }.minByOrNull { it.roomPrice }
+    val restStat = when {
+        cheapestHotelRestroom != null ->
+            "${hotels.size} hotel restroom(s) • From ₹${cheapestHotelRestroom.roomPrice.toInt()} / 12 hours"
+        cheapestRest != null ->
+            "${restrooms.size} rest room(s) • From ₹${cheapestRest.price.toInt()} ${cheapestRest.priceUnit}"
+        else -> "No rest rooms added yet"
     }
 
     val cheapestEv = evStations.minByOrNull { it.price }
@@ -159,6 +165,15 @@ fun FacilitiesScreen() {
     } else {
         "${evStations.size} station(s) • ${evStations.sumOf { it.capacity }} ports • " +
                 "From ₹${cheapestEv.price.toInt()} ${cheapestEv.priceUnit}"
+    }
+
+    val cheapestHotel = hotels
+        .filter { it.roomPrice > 0.0 }
+        .minByOrNull { it.roomPrice }
+    val hotelStat = when {
+        hotels.isEmpty() -> "No hotels with rooms yet"
+        cheapestHotel == null -> "${hotels.size} hotel(s) • Room rates coming soon"
+        else -> "${hotels.size} hotel(s) • From ₹${cheapestHotel.roomPrice.toInt()} / 12 hours"
     }
 
     Scaffold(
@@ -265,6 +280,18 @@ fun FacilitiesScreen() {
                                         container = MaterialTheme.colorScheme.tertiaryContainer,
                                         content = MaterialTheme.colorScheme.onTertiaryContainer,
                                         onClick = { filter = FacilityFilter.EV }
+                                    )
+                                }
+                                item {
+                                    HeroCard(
+                                        label = "Sleep",
+                                        title = "Hotel + Room",
+                                        description = "Pick a highway hotel that offers rooms " +
+                                                "and sleep before the next stretch.",
+                                        stat = hotelStat,
+                                        container = MaterialTheme.colorScheme.surfaceVariant,
+                                        content = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        onClick = { filter = FacilityFilter.HOTEL }
                                     )
                                 }
                             }
@@ -473,8 +500,10 @@ private fun HotelRoomCard(
     mall: FoodMall,
     modifier: Modifier = Modifier
 ) {
-    val hasPrice = mall.restroomPrice > 0
+    val hasPrice = mall.roomPrice > 0
     val open = mall.isOpen
+    val capacity = if (mall.roomCapacity > 0) mall.roomCapacity else HOTEL_CAPACITY
+    val amenities = mall.roomDetails.ifBlank { "Amenities not listed" }
 
     Card(modifier = modifier.fillMaxWidth()) {
         Column {
@@ -507,12 +536,8 @@ private fun HotelRoomCard(
 
                 Spacer(Modifier.height(8.dp))
                 Text("Rating: ${mall.rating}")
-                Text(
-                    mall.restroomDetails.ifEmpty { "Rest rooms available at this hotel" }
-                )
-                if (mall.restroomCapacity > 0) {
-                    Text("Sleeps up to ${mall.restroomCapacity} person(s)")
-                }
+                Text(amenities)
+                Text("Sleeps up to $capacity person(s)")
             }
 
             Row(
@@ -529,14 +554,14 @@ private fun HotelRoomCard(
                     val tone = if (open) MaterialTheme.colorScheme.onPrimaryContainer
                     else MaterialTheme.colorScheme.onSurfaceVariant
                     Text(
-                        text = "₹${mall.restroomPrice.toInt()}",
+                        text = "₹${mall.roomPrice.toInt()}",
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = tone
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        text = priceUnitLabel(mall.restroomPriceUnit),
+                        text = "/ ${mall.roomPriceUnit.ifBlank { "12 hours" }}",
                         style = MaterialTheme.typography.titleMedium,
                         color = tone,
                         modifier = Modifier.padding(bottom = 2.dp)

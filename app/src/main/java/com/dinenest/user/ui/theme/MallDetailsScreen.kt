@@ -43,8 +43,17 @@ fun MallDetailsScreen(mall: FoodMall, onBack: () -> Unit) {
             Text(if (mall.isOpen) "Open now" else "Closed")
             Spacer(Modifier.height(16.dp))
             Text("Facilities", style = MaterialTheme.typography.titleMedium)
-            Text(if (mall.hasRestRooms) "Rest rooms available" else "No rest rooms")
-            Text(if (mall.hasEvCharging) "EV charging available" else "No EV charging")
+            if (mall.hasRestRooms) {
+                Text("Rest rooms available")
+                if (mall.roomDetails.isNotBlank()) Text("Amenities: ${mall.roomDetails}")
+                if (mall.roomPrice > 0.0) {
+                    Text("Price: ₹${mall.roomPrice.toInt()} / ${mall.roomPriceUnit.ifBlank { "12 hours" }}")
+                } else {
+                    Text("Price not set yet")
+                }
+            } else {
+                Text("No rest rooms")
+            }
             Spacer(Modifier.height(8.dp))
             SaveButton(
                 saved = saved,

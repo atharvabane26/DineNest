@@ -120,7 +120,6 @@ fun MallCard(mall: FoodMall, onClick: () -> Unit) {
             Text("Rating: ${mall.rating}")
             val features = listOfNotNull(
                 if (mall.hasRestRooms) "Rest rooms" else null,
-                if (mall.hasEvCharging) "EV charging" else null
             )
             if (features.isNotEmpty()) Text(features.joinToString(" • "))
             Text(if (mall.isOpen) "Open now" else "Closed")
